@@ -1,0 +1,9 @@
+# Python bytecode
+__pycache__/
+
+# uv
+.venv/
+
+# Environment variables
+.env
+.env.*

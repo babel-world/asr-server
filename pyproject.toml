@@ -1,0 +1,22 @@
+[project]
+name = "faster-whisper-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "MatsubaraSoda", email = "matsubarasoda@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cuda-runtime-cu12>=12.9.79",
+    "nvidia-cudnn-cu12>=9.22.0.52",
+]
+
+[project.scripts]
+faster-whisper-server = "faster_whisper_server:main"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
