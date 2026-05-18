@@ -8,14 +8,16 @@ authors = [
 ]
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.136.1",
     "faster-whisper>=1.2.1",
     "nvidia-cublas-cu12>=12.9.2.10",
     "nvidia-cuda-runtime-cu12>=12.9.79",
     "nvidia-cudnn-cu12>=9.22.0.52",
+    "uvicorn[standard]>=0.47.0",
 ]
 
 [project.scripts]
-faster-whisper-server = "faster_whisper_server:main"
+faster-whisper-server = "faster_whisper_server.main:run"
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]
