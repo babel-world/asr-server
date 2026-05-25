@@ -26,7 +26,7 @@ uv sync
 uv run faster-whisper-server
 ```
 
-The API will now be available locally (default: `http://127.0.0.1:8000`).
+The API will now be available locally (default: `http://127.0.0.1:19031`).
 
 ## Project Structure
 

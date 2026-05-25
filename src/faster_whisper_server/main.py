@@ -15,5 +15,5 @@ def run() -> None:
     import uvicorn
 
     uvicorn.run(
-        "faster_whisper_server.main:app", host="127.0.0.1", port=8000, reload=True
+        "faster_whisper_server.main:app", host="127.0.0.1", port=19031, reload=True
     )
