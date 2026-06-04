@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from asr_server.service.slice import format_slice_chunk_filename
 from asr_server.utils.audio import (
     calculate_audio_rms,
     find_silence_boundaries,
@@ -71,12 +72,12 @@ def slice_and_save(
     hop_size_ms: int = DEFAULT_HOP_SIZE_MS,
     max_sil_kept_ms: int = DEFAULT_MAX_SIL_KEPT_MS,
 ) -> list[Path]:
-    """读取音频、切片，并写入 ``{源文件名}_{start}_{end}.wav``。"""
+    """读取音频、切片，并写入 ``{base_name}_{chunk_index:04d}_{start}-{end}.wav``。"""
     if not input_path.is_file():
         raise FileNotFoundError(f"输入文件不存在: {input_path}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    source_name = input_path.name
+    base_name = input_path.stem
 
     raw_waveform, source_sr = sf.read(input_path, dtype="float32")
     raw_waveform = np.asarray(raw_waveform, dtype=np.float32)
@@ -124,9 +125,9 @@ def slice_and_save(
     )
 
     saved_paths: list[Path] = []
-    for chunk in chunks:
-        out_name = (
-            f"{source_name}_{chunk.start_sample:010d}_{chunk.end_sample:010d}.wav"
+    for chunk_index, chunk in enumerate(chunks):
+        out_name = format_slice_chunk_filename(
+            base_name, chunk_index, chunk.start_sample, chunk.end_sample
         )
         out_path = output_dir / out_name
         sf.write(out_path, chunk.waveform, TARGET_SR, subtype="PCM_16")

@@ -17,6 +17,13 @@ def _cleanup_slice_session(session_dir: Path) -> None:
     "",
     response_class=FileResponse,
     summary="对上传音频按静音边界切片，返回 ZIP 压缩包",
+    description=(
+        "响应体为 ZIP。包内每个切片 WAV 的命名规则为："
+        "``{base_name}_{chunk_index:04d}_{start:010d}-{end:010d}.wav``。"
+        "``base_name`` 为上传文件主名（不含扩展名）；``chunk_index`` 从 0 起按时间顺序编号；"
+        "``start``/``end`` 为归一化后 32 kHz 单声道流上的采样点索引（半开区间 [start, end)）。"
+        "示例：``manbo_0000_0000000000-0000214720.wav``。"
+    ),
 )
 async def slice_audio(
     background_tasks: BackgroundTasks,

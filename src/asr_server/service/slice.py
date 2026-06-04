@@ -17,6 +17,29 @@ from asr_server.utils.audio import (
 
 TARGET_SR = 32_000
 
+# ZIP 内每个切片 WAV 的命名约定（供 /api/slice 调用方解析）:
+#   {base_name}_{chunk_index:04d}_{start:010d}-{end:010d}.wav
+# - base_name: 上传文件主名（不含扩展名），如 manbo.mp3 -> manbo
+# - chunk_index: 0-based，按时间顺序递增
+# - start/end: 归一化后 32 kHz 单声道波形上的采样点索引，半开区间 [start, end)
+# 示例: manbo_0000_0000000000-0000214720.wav
+
+
+def format_slice_chunk_filename(
+    base_name: str,
+    chunk_index: int,
+    start_sample: int,
+    end_sample: int,
+) -> str:
+    """生成切片 WAV 文件名。
+
+    格式: ``{base_name}_{chunk_index:04d}_{start:010d}-{end:010d}.wav``
+    """
+    return (
+        f"{base_name}_{chunk_index:04d}_"
+        f"{start_sample:010d}-{end_sample:010d}.wav"
+    )
+
 
 def _ms_to_frame_params(
     *,
@@ -57,12 +80,15 @@ def sync_slice_and_zip(
     hop_size_ms: int,
     max_sil_kept_ms: int,
 ) -> tuple[Path, Path]:
-    """切片并打包为 ZIP。返回 ``(zip_path, session_dir)``，由调用方负责清理 ``session_dir``。"""
+    """切片并打包为 ZIP。返回 ``(zip_path, session_dir)``，由调用方负责清理 ``session_dir``。
+
+    ZIP 内每个 WAV 的文件名见模块顶部约定及 ``format_slice_chunk_filename``。
+    """
     session_dir = Path(tempfile.mkdtemp(prefix="asr_slice_"))
     chunks_dir = session_dir / "chunks"
     chunks_dir.mkdir()
 
-    source_name = Path(filename).name or "audio"
+    base_name = Path(filename).stem or "audio"
 
     raw_waveform, source_sr = sf.read(io.BytesIO(file_bytes), dtype="float32")
     raw_waveform = np.asarray(raw_waveform, dtype=np.float32)
@@ -109,9 +135,9 @@ def sync_slice_and_zip(
         total_frames=total_frames,
     )
 
-    for chunk in chunks:
-        out_name = (
-            f"{source_name}_{chunk.start_sample:010d}_{chunk.end_sample:010d}.wav"
+    for chunk_index, chunk in enumerate(chunks):
+        out_name = format_slice_chunk_filename(
+            base_name, chunk_index, chunk.start_sample, chunk.end_sample
         )
         sf.write(
             chunks_dir / out_name,
