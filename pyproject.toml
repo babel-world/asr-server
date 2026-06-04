@@ -9,11 +9,14 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.136.1",
+    "numpy>=2.0.0",
+    "scipy>=1.14.0",
     "faster-whisper>=1.2.1",
     "nvidia-cublas-cu12>=12.9.2.10",
     "nvidia-cuda-runtime-cu12>=12.9.79",
     "nvidia-cudnn-cu12>=9.22.0.52",
     "python-multipart>=0.0.29",
+    "soundfile>=0.13.0",
     "uvicorn[standard]>=0.47.0",
 ]
 
