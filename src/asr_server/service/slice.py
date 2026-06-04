@@ -14,6 +14,7 @@ from asr_server.utils.audio import (
     normalize_audio,
     slice_waveform_by_boundaries,
 )
+from asr_server.utils.manifest_zip import format_slice_zip_download_name
 
 TARGET_SR = 32_000
 
@@ -173,5 +174,5 @@ async def slice_upload_to_zip(
         hop_size_ms=hop_size_ms,
         max_sil_kept_ms=max_sil_kept_ms,
     )
-    download_name = f"{Path(filename).name}_slices.zip"
+    download_name = format_slice_zip_download_name(filename)
     return zip_path, session_dir, download_name
