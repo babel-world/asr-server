@@ -1,3 +1,4 @@
+import gc
 import os
 from pathlib import Path
 
@@ -18,6 +19,29 @@ def _get_model() -> WhisperModel:
             compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
         )
     return _model
+
+
+def is_model_loaded() -> bool:
+    return _model is not None
+
+
+def warmup_model() -> bool:
+    """Load WhisperModel into memory if not already loaded. Returns True if newly loaded."""
+    already_loaded = is_model_loaded()
+    _get_model()
+    return not already_loaded
+
+
+def release_model() -> bool:
+    """Drop cached WhisperModel from memory. Returns True if a model was released."""
+    global _model
+    if _model is None:
+        return False
+    model = _model
+    _model = None
+    del model
+    gc.collect()
+    return True
 
 
 def sync_transcribe_file(path: Path) -> TranscribeResponseBody:
