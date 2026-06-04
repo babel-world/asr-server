@@ -20,6 +20,11 @@ dependencies = [
     "uvicorn[standard]>=0.47.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.28.0",
+]
+
 [project.scripts]
 asr-server = "asr_server.main:run"
 
