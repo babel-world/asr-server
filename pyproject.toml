@@ -1,5 +1,5 @@
 [project]
-name = "faster-whisper-server"
+name = "asr-server"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-faster-whisper-server = "faster_whisper_server.main:run"
+asr-server = "asr_server.main:run"
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]

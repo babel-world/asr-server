@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, UploadFile
 
-from faster_whisper_server.api.deps import valid_wav_file
-from faster_whisper_server.schemas.transcribe import (
+from asr_server.api.deps import valid_wav_file
+from asr_server.schemas.transcribe import (
     TranscribeRequestBody,
     TranscribeResponseBody,
 )
-from faster_whisper_server.service.transcribe import transcribe_upload
+from asr_server.service.transcribe import transcribe_upload
 
 router = APIRouter(prefix="/transcribe", tags=["transcribe"])
 

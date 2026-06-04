@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from faster_whisper_server.api.router import api_router
+from asr_server.api.router import api_router
 
 app = FastAPI()
 app.include_router(api_router)
@@ -15,5 +15,5 @@ def run() -> None:
     import uvicorn
 
     uvicorn.run(
-        "faster_whisper_server.main:app", host="127.0.0.1", port=19031, reload=True
+        "asr_server.main:app", host="127.0.0.1", port=19031, reload=True
     )

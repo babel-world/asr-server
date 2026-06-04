@@ -3,8 +3,8 @@ from pathlib import Path
 
 from faster_whisper import WhisperModel
 
-from faster_whisper_server.loaders import cuda_utils  # noqa: F401 — register CUDA DLLs on import
-from faster_whisper_server.schemas.transcribe import TranscribeResponseBody
+from asr_server.loaders import cuda_utils  # noqa: F401 — register CUDA DLLs on import
+from asr_server.schemas.transcribe import TranscribeResponseBody
 
 _model: WhisperModel | None = None
 

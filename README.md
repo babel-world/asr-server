@@ -1,4 +1,4 @@
-# Faster Whisper Server
+# ASR Server
 
 A local, high-performance audio transcription API powered by faster-whisper and FastAPI.
 
@@ -23,7 +23,7 @@ Before running the server, ensure you have the following ready:
 
 ```bash
 uv sync
-uv run faster-whisper-server
+uv run asr-server
 ```
 
 The API will now be available locally (default: `http://127.0.0.1:19031`).
@@ -31,11 +31,11 @@ The API will now be available locally (default: `http://127.0.0.1:19031`).
 ## Project Structure
 
 ```text
-faster-whisper-server/
+asr-server/
 ├── pyproject.toml
 ├── README.md
 ├── src/
-│   └── faster_whisper_server/
+│   └── asr_server/
 │       ├── api/
 │       │   ├── deps.py
 │       │   ├── router.py

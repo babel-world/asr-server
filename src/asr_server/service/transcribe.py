@@ -5,8 +5,8 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
-from faster_whisper_server.schemas.transcribe import TranscribeResponseBody
-from faster_whisper_server.service.whisper_model import sync_transcribe_file
+from asr_server.schemas.transcribe import TranscribeResponseBody
+from asr_server.service.whisper_model import sync_transcribe_file
 
 # Single Whisper model / GPU — one transcription at a time (like the washing machine lock).
 _transcribe_lock = asyncio.Lock()
