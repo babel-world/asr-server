@@ -7,3 +7,7 @@ __pycache__/
 # Environment variables
 .env
 .env.*
+!.env.example
+
+# Local faster-whisper model cache
+.models/
