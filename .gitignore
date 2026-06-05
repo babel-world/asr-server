@@ -7,9 +7,3 @@ __pycache__/
 # Environment variables
 .env
 .env.*
-
-# Local-only notes and drafts (not tracked)
-private-docs/
-
-# TEMP
-TEMP/
