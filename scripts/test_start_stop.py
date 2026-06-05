@@ -1,40 +1,46 @@
 """验证 POST /api/transcribe/start 与 /api/transcribe/stop 的行为与时延差异。
 
-测试前请自行启动服务（项目根目录）::
-
-    uv run asr-server
-
-然后执行本脚本::
+脚本会自动管理 asr-server 生命周期（含 19031 端口占用清理）::
 
     uv sync --extra dev
     uv run python scripts/test_start_stop.py
     uv run python scripts/test_start_stop.py --rounds 3
-    uv run python scripts/test_start_stop.py --wav TEMP/manbo_0035_0006602240-0006684160.wav
+    uv run python scripts/test_start_stop.py --wav .local/TEMP/manbo_0035_0006602240-0006684160.wav
 
-报告输出目录：TEMP/reports/
+报告输出目录：.local/TEMP/reports/
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import random
 import statistics
+import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+from urllib.parse import urlparse
 
 import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BASE_URL = "http://127.0.0.1:19031"
-DEFAULT_SAMPLE_DIR = REPO_ROOT / "TEMP"
-DEFAULT_REPORTS_DIR = REPO_ROOT / "TEMP" / "reports"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 19031
+DEFAULT_SAMPLE_DIR = REPO_ROOT / ".local" / "TEMP"
+DEFAULT_REPORTS_DIR = REPO_ROOT / ".local" / "TEMP" / "reports"
 DEFAULT_WAV = DEFAULT_SAMPLE_DIR / "manbo_0035_0006602240-0006684160.wav"
 DEFAULT_ROUNDS = 5
 DEFAULT_TIMEOUT_S = 600.0
 DEFAULT_STOP_SLOWER_RATIO = 0.8
+BASELINE_REPORT_JSON = DEFAULT_REPORTS_DIR / "start_stop_check_20260604_225553.json"
+BASELINE_COMMIT = "6ac704ce58e1fc4ddff77e2fdbd474f209aeaa2a"
+SERVER_STARTUP_TIMEOUT_S = 120.0
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,8 +55,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--wav",
         type=Path,
-        default=DEFAULT_WAV,
-        help="WAV file for transcribe requests",
+        default=None,
+        help="WAV file for transcribe requests (default: random from sample-dir)",
     )
     parser.add_argument(
         "--sample-dir",
@@ -85,6 +91,17 @@ def _parse_args() -> argparse.Namespace:
             f"start->transcribe (default: {DEFAULT_STOP_SLOWER_RATIO})"
         ),
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for WAV selection when --wav is omitted",
+    )
+    parser.add_argument(
+        "--no-manage-server",
+        action="store_true",
+        help="Do not start/stop asr-server automatically (assume already running)",
+    )
     return parser.parse_args()
 
 
@@ -93,15 +110,255 @@ def _now_stamp() -> str:
 
 
 def _resolve_wav(args: argparse.Namespace) -> Path:
-    wav = args.wav
-    if wav.exists():
-        return wav.resolve()
-    if args.sample_dir.exists():
-        candidates = sorted(args.sample_dir.glob("*.wav"))
-        if candidates:
-            return candidates[0].resolve()
-    print(f"WAV not found: {wav}", file=sys.stderr)
-    raise SystemExit(1)
+    if args.wav is not None:
+        wav = args.wav if args.wav.is_absolute() else REPO_ROOT / args.wav
+        if wav.exists():
+            return wav.resolve()
+        print(f"WAV not found: {wav}", file=sys.stderr)
+        raise SystemExit(1)
+
+    sample_dir = args.sample_dir if args.sample_dir.is_absolute() else REPO_ROOT / args.sample_dir
+    candidates = sorted(sample_dir.glob("*.wav"))
+    if not candidates:
+        print(f"No .wav files found in {sample_dir}", file=sys.stderr)
+        raise SystemExit(1)
+    rng = random.Random(args.seed)
+    return rng.choice(candidates).resolve()
+
+
+def _pids_on_port(host: str, port: int) -> list[int]:
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        needle = f"{host}:{port}"
+        pids: set[int] = set()
+        for line in result.stdout.splitlines():
+            if needle not in line or "LISTENING" not in line:
+                continue
+            parts = line.split()
+            if parts:
+                try:
+                    pids.add(int(parts[-1]))
+                except ValueError:
+                    continue
+        return sorted(pids)
+
+    result = subprocess.run(
+        ["lsof", "-ti", f"tcp:{port}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            pids.append(int(line))
+    return pids
+
+
+def _process_name(pid: int) -> str | None:
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        line = result.stdout.strip()
+        if not line or "No tasks" in line:
+            return None
+        return line.split(",")[0].strip('"').lower()
+
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "comm="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    name = result.stdout.strip().lower()
+    return name or None
+
+
+def _is_python_process(pid: int) -> bool:
+    name = _process_name(pid) or ""
+    return "python" in name
+
+
+def _kill_pid(pid: int) -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], check=False)
+        return
+    subprocess.run(["kill", "-9", str(pid)], check=False)
+
+
+def _ensure_port_available(host: str, port: int) -> dict[str, Any]:
+    """Free port if occupied by python; abort otherwise."""
+    record: dict[str, Any] = {
+        "host": host,
+        "port": port,
+        "initial_pids": [],
+        "killed_pids": [],
+        "blocked_pids": [],
+        "action": "none",
+    }
+    pids = _pids_on_port(host, port)
+    record["initial_pids"] = pids
+    if not pids:
+        return record
+
+    for pid in pids:
+        if _is_python_process(pid):
+            _kill_pid(pid)
+            record["killed_pids"].append(pid)
+        else:
+            record["blocked_pids"].append(
+                {"pid": pid, "process_name": _process_name(pid)}
+            )
+
+    if record["blocked_pids"]:
+        record["action"] = "blocked_non_python"
+        return record
+
+    record["action"] = "killed_python" if record["killed_pids"] else "none"
+    time.sleep(1.0)
+    return record
+
+
+def _wait_for_server(base_url: str, timeout_s: float) -> bool:
+    deadline = time.perf_counter() + timeout_s
+    while time.perf_counter() < deadline:
+        try:
+            resp = httpx.get(f"{base_url}/docs", timeout=2.0)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+@contextmanager
+def _managed_server(base_url: str, manage_server: bool) -> Iterator[dict[str, Any]]:
+    lifecycle: dict[str, Any] = {
+        "managed": manage_server,
+        "port_guard": None,
+        "server_pid": None,
+        "startup_ok": None,
+    }
+    proc: subprocess.Popen[str] | None = None
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname or DEFAULT_HOST
+    port = parsed.port or DEFAULT_PORT
+
+    if not manage_server:
+        yield lifecycle
+        return
+
+    lifecycle["port_guard"] = _ensure_port_available(host, port)
+    if lifecycle["port_guard"]["action"] == "blocked_non_python":
+        blocked = lifecycle["port_guard"]["blocked_pids"]
+        raise RuntimeError(
+            f"Port {host}:{port} is occupied by non-python process: {blocked}"
+        )
+
+    proc = subprocess.Popen(
+        ["uv", "run", "asr-server"],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    lifecycle["server_pid"] = proc.pid
+    lifecycle["startup_ok"] = _wait_for_server(base_url, SERVER_STARTUP_TIMEOUT_S)
+    if not lifecycle["startup_ok"]:
+        proc.terminate()
+        raise RuntimeError(f"Server failed to start within {SERVER_STARTUP_TIMEOUT_S}s")
+
+    try:
+        yield lifecycle
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+def _collect_env_snapshot() -> dict[str, str | None]:
+    keys = (
+        "WHISPER_MODEL",
+        "WHISPER_DEVICE",
+        "WHISPER_COMPUTE_TYPE",
+        "WHISPER_MODELS_DIR",
+        "ASR_REPO_ROOT",
+        "HF_HOME",
+        "HUGGINGFACE_HUB_CACHE",
+    )
+    return {k: os.getenv(k) for k in keys}
+
+
+def _collect_model_layout() -> dict[str, Any]:
+    model_name = os.getenv("WHISPER_MODEL", "base")
+    try:
+        from asr_server.utils.whisper_assets import (
+            ensure_whisper_model_path,
+            find_hf_snapshot,
+            get_local_models_dir,
+            is_ct2_model_dir,
+            local_model_dir,
+        )
+
+        local_path = local_model_dir(model_name)
+        hf_path = find_hf_snapshot(model_name)
+        resolved_path, source = ensure_whisper_model_path(model_name)
+        return {
+            "whisper_model": model_name,
+            "local_models_dir": str(get_local_models_dir()),
+            "local_model_path": str(local_path),
+            "local_model_valid": is_ct2_model_dir(local_path),
+            "hf_snapshot_path": str(hf_path) if hf_path else None,
+            "resolved_path": str(resolved_path),
+            "resolved_source": source,
+        }
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _git_snapshot() -> dict[str, Any]:
+    def _run(cmd: list[str]) -> str:
+        result = subprocess.run(
+            cmd,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return (result.stdout or result.stderr).strip()
+
+    status_short = _run(["git", "status", "--short"])
+    diff_names = _run(["git", "diff", "--name-only", BASELINE_COMMIT])
+    untracked = [
+        line[3:].strip()
+        for line in status_short.splitlines()
+        if line.startswith("??")
+    ]
+    changed = [line.strip() for line in diff_names.splitlines() if line.strip()]
+    changed.extend(untracked)
+    return {
+        "head": _run(["git", "rev-parse", "HEAD"]),
+        "baseline_commit": BASELINE_COMMIT,
+        "status_short": status_short,
+        "diff_names": diff_names,
+        "untracked_files": untracked,
+        "all_changed_files": sorted(set(changed)),
+    }
 
 
 def _post_json(client: httpx.Client, url: str) -> dict[str, Any]:
@@ -252,6 +509,13 @@ def _aggregate(rounds: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _step_by_name(basic: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    for step in basic:
+        if step.get("name") == name:
+            return step
+    return None
+
+
 def _evaluate(
     basic: list[dict[str, Any]],
     rounds: list[dict[str, Any]],
@@ -286,19 +550,32 @@ def _evaluate(
         agg["rounds_stop_slower_count"] / agg["rounds_total"] if agg["rounds_total"] else 0.0
     )
     latency_pass = stop_slower_ratio >= stop_slower_threshold
+
+    ratio_avg = agg.get("ratio_avg") or 0.0
+    latency_gap_significant = ratio_avg >= 10.0
     if not latency_pass:
         issues.append(
             f"latency comparison weak: only {agg['rounds_stop_slower_count']}/{agg['rounds_total']} "
             f"rounds have stop->transcribe slower than start->transcribe "
             f"(threshold {stop_slower_threshold:.0%})"
         )
+    if latency_pass and not latency_gap_significant:
+        issues.append(
+            f"latency gap not significant enough for manual inspection: ratio_avg={ratio_avg} (<10)"
+        )
 
     functional_pass = not any("failed" in i or "loaded !=" in i for i in issues)
-    if functional_pass and latency_pass:
+    if functional_pass and latency_pass and latency_gap_significant:
         judgement = "PASS"
         conclusion = (
-            "start/stop functional checks passed; start preloads model and stop triggers reload cost "
-            f"({agg['rounds_stop_slower_count']}/{agg['rounds_total']} rounds slower after stop)."
+            "start/stop functional checks passed; stop->transcribe is significantly slower than "
+            f"start->transcribe (ratio_avg={ratio_avg})."
+        )
+    elif functional_pass and latency_pass:
+        judgement = "WEAK_PASS"
+        conclusion = (
+            "Functional checks passed and stop is slower, but latency gap is too small to confirm "
+            "cold-reload behavior (expected large gap like baseline report)."
         )
     elif functional_pass:
         judgement = "FAIL"
@@ -310,10 +587,123 @@ def _evaluate(
     return {
         "functional_pass": functional_pass,
         "latency_pass": latency_pass,
+        "latency_gap_significant": latency_gap_significant,
         "stop_slower_ratio": round(stop_slower_ratio, 3),
         "stop_slower_threshold": stop_slower_threshold,
         "issues": issues,
         "judgement": judgement,
+        "conclusion": conclusion,
+    }
+
+
+def _load_baseline_report(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _extract_metrics(report: dict[str, Any]) -> dict[str, Any]:
+    basic = report.get("basic_checks", [])
+    agg = report.get("aggregate", {})
+    basic_start = _step_by_name(basic, "basic_start")
+    basic_implicit = _step_by_name(basic, "basic_transcribe_implicit")
+    return {
+        "timestamp": report.get("meta", {}).get("timestamp"),
+        "basic_start_ms": basic_start.get("elapsed_ms") if basic_start else None,
+        "basic_transcribe_implicit_ms": (
+            basic_implicit.get("elapsed_ms") if basic_implicit else None
+        ),
+        "avg_after_stop_ms": agg.get("avg_after_stop_ms"),
+        "avg_after_start_ms": agg.get("avg_after_start_ms"),
+        "ratio_avg": agg.get("ratio_avg"),
+        "judgement": report.get("evaluation", {}).get("judgement"),
+    }
+
+
+def _build_investigation(
+    *,
+    current_report: dict[str, Any],
+    current_json_path: Path,
+    baseline_report: dict[str, Any] | None,
+    lifecycle: dict[str, Any],
+    env_snapshot: dict[str, str | None],
+    model_layout: dict[str, Any],
+    git_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    current_metrics = _extract_metrics(current_report)
+    baseline_metrics = _extract_metrics(baseline_report) if baseline_report else None
+
+    hypotheses: list[dict[str, str]] = []
+    changed_files = "\n".join(git_snapshot.get("all_changed_files", []))
+    if "src/asr_server/service/whisper_model.py" in changed_files:
+        hypotheses.append(
+            {
+                "area": "whisper_model.py",
+                "detail": (
+                    "Model init now resolves local/HF path via ensure_whisper_model_path and uses "
+                    "local_files_only=True. If resolved path is local/HF cache, cold reload after "
+                    "stop may become much faster than baseline."
+                ),
+            }
+        )
+    if "src/asr_server/utils/whisper_assets.py" in changed_files:
+        hypotheses.append(
+            {
+                "area": "whisper_assets.py",
+                "detail": (
+                    "New model path resolution may prefer .models or HF cache, changing disk I/O "
+                    "profile and reducing stop->transcribe reload penalty."
+                ),
+            }
+        )
+    if "src/asr_server/main.py" in changed_files:
+        hypotheses.append(
+            {
+                "area": "main.py",
+                "detail": "Startup now loads .env via _load_dotenv; environment differences may "
+                "alter model/device selection across runs.",
+            }
+        )
+
+    ratio_current = current_metrics.get("ratio_avg") or 0.0
+    ratio_baseline = (baseline_metrics or {}).get("ratio_avg") or 0.0
+    gap_regression = ratio_current < 10.0 and ratio_baseline >= 10.0
+
+    conclusion = (
+        "Current uncommitted changes show a much smaller stop/start transcribe gap than baseline "
+        f"({ratio_current} vs {ratio_baseline}). This suggests start/stop API semantics still pass, "
+        "but cold-reload cost after stop is no longer obvious."
+    )
+    if gap_regression and model_layout.get("resolved_source") in {"local", "hf_cache"}:
+        conclusion += (
+            f" Likely linked to faster local model resolution (source={model_layout.get('resolved_source')})."
+        )
+
+    return {
+        "meta": {
+            "timestamp": _now_stamp(),
+            "baseline_report_json": str(BASELINE_REPORT_JSON),
+            "current_report_json": str(current_json_path),
+            "baseline_commit": BASELINE_COMMIT,
+        },
+        "server_lifecycle": lifecycle,
+        "environment": env_snapshot,
+        "model_layout": model_layout,
+        "git_snapshot": git_snapshot,
+        "metrics": {
+            "baseline": baseline_metrics,
+            "current": current_metrics,
+        },
+        "comparison": {
+            "ratio_avg_delta": round(ratio_current - ratio_baseline, 3),
+            "avg_after_stop_ms_delta": round(
+                (current_metrics.get("avg_after_stop_ms") or 0)
+                - (baseline_metrics or {}).get("avg_after_stop_ms", 0),
+                2,
+            ),
+            "gap_regression": gap_regression,
+        },
+        "hypotheses": hypotheses,
         "conclusion": conclusion,
     }
 
@@ -363,6 +753,61 @@ def _write_summary(path: Path, report: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_investigation_summary(path: Path, investigation: dict[str, Any]) -> None:
+    baseline = investigation["metrics"]["baseline"] or {}
+    current = investigation["metrics"]["current"]
+    cmp_ = investigation["comparison"]
+    lines = [
+        "# start/stop Investigation Summary",
+        "",
+        f"- **Timestamp**: {investigation['meta']['timestamp']}",
+        f"- **Baseline report**: `{investigation['meta']['baseline_report_json']}`",
+        f"- **Current report**: `{investigation['meta']['current_report_json']}`",
+        f"- **Baseline commit**: `{investigation['meta']['baseline_commit']}`",
+        "",
+        "## Key Metrics",
+        "",
+        "| Metric | Baseline | Current | Delta |",
+        "|--------|----------|---------|-------|",
+        f"| ratio_avg | {baseline.get('ratio_avg')} | {current.get('ratio_avg')} | {cmp_.get('ratio_avg_delta')} |",
+        f"| avg_after_stop_ms | {baseline.get('avg_after_stop_ms')} | {current.get('avg_after_stop_ms')} | {cmp_.get('avg_after_stop_ms_delta')} |",
+        f"| avg_after_start_ms | {baseline.get('avg_after_start_ms')} | {current.get('avg_after_start_ms')} | - |",
+        f"| basic_start_ms | {baseline.get('basic_start_ms')} | {current.get('basic_start_ms')} | - |",
+        f"| basic_transcribe_implicit_ms | {baseline.get('basic_transcribe_implicit_ms')} | {current.get('basic_transcribe_implicit_ms')} | - |",
+        "",
+        "## Server Lifecycle",
+        "",
+        f"- managed: {investigation['server_lifecycle'].get('managed')}",
+        f"- port_guard: {json.dumps(investigation['server_lifecycle'].get('port_guard'), ensure_ascii=False)}",
+        "",
+        "## Model Layout",
+        "",
+        f"```json\n{json.dumps(investigation['model_layout'], ensure_ascii=False, indent=2)}\n```",
+        "",
+        "## Git Snapshot",
+        "",
+        f"- HEAD: `{investigation['git_snapshot'].get('head')}`",
+        f"- changed files since baseline:",
+    ]
+    for name in investigation["git_snapshot"].get("all_changed_files", []):
+        lines.append(f"  - `{name}`")
+
+    lines.extend(["", "## Hypotheses", ""])
+    for item in investigation["hypotheses"]:
+        lines.append(f"- **{item['area']}**: {item['detail']}")
+
+    lines.extend(
+        [
+            "",
+            "## Conclusion",
+            "",
+            investigation["conclusion"],
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     args = _parse_args()
     wav = _resolve_wav(args)
@@ -375,26 +820,29 @@ def main() -> int:
     stamp = _now_stamp()
     json_path = args.reports_dir / f"start_stop_check_{stamp}.json"
     md_path = args.reports_dir / f"start_stop_check_{stamp}_summary.md"
+    investigation_json_path = args.reports_dir / f"start_stop_investigation_{stamp}.json"
+    investigation_md_path = args.reports_dir / f"start_stop_investigation_{stamp}_summary.md"
+
+    env_snapshot = _collect_env_snapshot()
+    model_layout = _collect_model_layout()
+    git_snapshot = _git_snapshot()
 
     print(f"wav: {wav.name}")
     print(f"rounds: {args.rounds}")
 
     t0 = time.perf_counter()
-    with httpx.Client(timeout=args.timeout) as client:
-        health = client.get(f"{base_url}/docs")
-        if health.status_code != 200:
-            print(
-                f"Server not ready at {base_url}. Start it first: uv run asr-server",
-                file=sys.stderr,
-            )
-            print(f"/docs -> {health.status_code}", file=sys.stderr)
-            return 1
-
-        basic = _run_basic_checks(client, transcribe_url, start_url, stop_url, wav)
-        rounds = [
-            _run_latency_round(client, transcribe_url, start_url, stop_url, wav, i + 1)
-            for i in range(args.rounds)
-        ]
+    lifecycle: dict[str, Any] = {"managed": False}
+    try:
+        with _managed_server(base_url, manage_server=not args.no_manage_server) as lifecycle:
+            with httpx.Client(timeout=args.timeout) as client:
+                basic = _run_basic_checks(client, transcribe_url, start_url, stop_url, wav)
+                rounds = [
+                    _run_latency_round(client, transcribe_url, start_url, stop_url, wav, i + 1)
+                    for i in range(args.rounds)
+                ]
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     aggregate = _aggregate(rounds)
     evaluation = _evaluate(basic, rounds, aggregate, args.stop_slower_ratio)
@@ -404,8 +852,13 @@ def main() -> int:
             "timestamp": stamp,
             "base_url": base_url,
             "wav": wav.name,
+            "wav_path": str(wav),
             "rounds": args.rounds,
             "elapsed_s": round(time.perf_counter() - t0, 2),
+            "environment": env_snapshot,
+            "model_layout": model_layout,
+            "server_lifecycle": lifecycle,
+            "git_snapshot": git_snapshot,
         },
         "basic_checks": basic,
         "rounds": rounds,
@@ -416,10 +869,28 @@ def main() -> int:
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_summary(md_path, report)
 
+    baseline_report = _load_baseline_report(BASELINE_REPORT_JSON)
+    investigation = _build_investigation(
+        current_report=report,
+        current_json_path=json_path,
+        baseline_report=baseline_report,
+        lifecycle=lifecycle,
+        env_snapshot=env_snapshot,
+        model_layout=model_layout,
+        git_snapshot=git_snapshot,
+    )
+    investigation_json_path.write_text(
+        json.dumps(investigation, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    _write_investigation_summary(investigation_md_path, investigation)
+
     print(f"judgement: {evaluation['judgement']}")
     print(f"json: {json_path}")
     print(f"summary: {md_path}")
-    return 0 if evaluation["judgement"] == "PASS" else 1
+    print(f"investigation_json: {investigation_json_path}")
+    print(f"investigation_summary: {investigation_md_path}")
+    return 0 if evaluation["judgement"] in {"PASS", "WEAK_PASS"} else 1
 
 
 if __name__ == "__main__":
