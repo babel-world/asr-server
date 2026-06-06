@@ -4,3 +4,4 @@ repo_id = "TencentGameMate/chinese-hubert-base"
 path = "huggingface/TencentGameMate/chinese-hubert-base"
 cli = "chinese-hubert-base"
 description = "Chinese HuBERT feature extraction (scaffold)"
+timeout_sec = 120

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from chinese_hubert_base import download, extract
+from chinese_hubert_base import download, extract, serve
 
 
 def _cmd_download(_args: argparse.Namespace) -> int:
@@ -20,6 +20,10 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     print(f"input={args.input}")
     print(f"output={output_path}")
     return 0
+
+
+def _cmd_serve(_args: argparse.Namespace) -> int:
+    return serve.run_serve()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -53,6 +57,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Output feature .npy path (last_hidden_state, shape (1, T', 768))",
     )
     extract_parser.set_defaults(handler=_cmd_extract)
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Run long-lived extract server (JSON lines on stdin; for asr-server batch)",
+    )
+    serve_parser.set_defaults(handler=_cmd_serve)
 
     args = parser.parse_args(argv)
     if args.command is None:

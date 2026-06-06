@@ -12,3 +12,13 @@ async def valid_wav_file(
         raise HTTPException(status_code=400, detail="Filename must end with .wav")
 
     return file
+
+
+async def valid_npy_file(
+    file: UploadFile = File(..., description="NumPy .npy waveform file"),
+) -> UploadFile:
+    """Dependency to validate that the uploaded file is a .npy file."""
+    if not file.filename or not file.filename.lower().endswith(".npy"):
+        raise HTTPException(status_code=400, detail="Filename must end with .npy")
+
+    return file
