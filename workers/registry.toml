@@ -1,0 +1,6 @@
+[chinese-hubert-base]
+source = "huggingface"
+repo_id = "TencentGameMate/chinese-hubert-base"
+path = "huggingface/TencentGameMate/chinese-hubert-base"
+cli = "chinese-hubert-base"
+description = "Chinese HuBERT feature extraction (scaffold)"
