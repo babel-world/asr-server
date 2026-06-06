@@ -1,4 +1,21 @@
-"""Extract HuBERT features from in-memory waveforms (production) or .npy files (CLI tests)."""
+"""Extract HuBERT features from in-memory waveforms (production) or .npy files (CLI tests).
+
+This worker is tuned for the GPT-SoVITS fine-tuning pipeline, not a generic Hugging Face
+audio demo. Callers in asr-server are expected to supply waveforms that upstream has already
+prepared in that convention (mono float32, 16 kHz, GPT-SoVITS scaling).
+
+Why this differs from the HF README:
+- Official usage runs raw audio through ``Wav2Vec2FeatureExtractor`` (normalize, padding, etc.)
+  before ``HubertModel``.
+- Here we skip that layer and feed ``input_values`` directly, matching GPT-SoVITS practice and
+  validated against reference outputs from that chain.
+- ``TARGET_SAMPLE_RATE`` and ``HIDDEN_SIZE`` document model/checkpoint expectations; this
+  module does not resample or re-normalize—those stay upstream.
+
+If you reuse chinese_hubert_base for other tasks (raw wav, HF-standard preprocessing, or a
+different HuBERT checkpoint), add a separate preprocess step or fork the input contract rather
+than assuming this extract path is model-agnostic.
+"""
 
 from __future__ import annotations
 
