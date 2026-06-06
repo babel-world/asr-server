@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> None:
 
     extract_parser = subparsers.add_parser(
         "extract",
-        help="Extract HuBERT features from a waveform .npy file",
+        help="Extract HuBERT features from a waveform .npy file (test/CLI shell)",
     )
     extract_parser.add_argument(
         "--input",
