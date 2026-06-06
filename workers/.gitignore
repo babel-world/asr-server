@@ -1,0 +1,8 @@
+# Worker-local dev fixtures (test inputs, samples)
+.local/
+
+# Generated inference / pipeline outputs
+outputs/
+
+# Downloaded model weights (per-worker .models under src packages)
+.models/
