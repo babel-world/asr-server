@@ -14,7 +14,6 @@ from asr_server.utils.audio import (
     normalize_audio,
     slice_waveform_by_boundaries,
 )
-from asr_server.utils.manifest_zip import format_slice_zip_download_name
 
 TARGET_SR = 32_000
 
@@ -40,6 +39,12 @@ def format_slice_chunk_filename(
         f"{base_name}_{chunk_index:04d}_"
         f"{start_sample:010d}-{end_sample:010d}.wav"
     )
+
+
+def format_slice_zip_download_name(source_filename: str) -> str:
+    """切片 ZIP 下载名: ``{stem}_slices.zip``（不含源文件扩展名中的点）。"""
+    stem = Path(source_filename).stem or "audio"
+    return f"{stem}_slices.zip"
 
 
 def _ms_to_frame_params(
