@@ -18,7 +18,7 @@ from asr_server.utils.manifest_zip import format_slice_zip_download_name
 
 TARGET_SR = 32_000
 
-# ZIP 内每个切片 WAV 的命名约定（供 /api/slice 调用方解析）:
+# ZIP 内每个切片 WAV 的命名约定（供 /api/audio/slice 调用方解析）:
 #   {base_name}_{chunk_index:04d}_{start:010d}-{end:010d}.wav
 # - base_name: 上传文件主名（不含扩展名），如 manbo.mp3 -> manbo
 # - chunk_index: 0-based，按时间顺序递增

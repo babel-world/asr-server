@@ -18,7 +18,7 @@ def _cleanup_manifest_session(session_dir: Path) -> None:
     response_class=FileResponse,
     summary="从切片 ZIP 批量转录并生成 manifest CSV",
     description=(
-        "请求体为 ``/api/slice`` 返回的 ZIP（内含切片 WAV）。"
+        "请求体为 ``/api/audio/slice`` 返回的 ZIP（内含切片 WAV）。"
         "包内每个 WAV 须符合 ``{base_name}_{chunk_index:04d}_{start:010d}-{end:010d}.wav``，"
         "且所有文件的 ``base_name`` 相同。"
         "响应为 ``{base_name}_manifest.csv``，表头: "

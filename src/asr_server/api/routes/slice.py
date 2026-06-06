@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 
 from asr_server.service.slice import slice_upload_to_zip
 
-router = APIRouter(prefix="/slice", tags=["slice"])
+router = APIRouter(prefix="/audio/slice", tags=["slice"])
 
 
 def _cleanup_slice_session(session_dir: Path) -> None:
