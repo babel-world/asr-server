@@ -74,6 +74,46 @@ def _readline_with_timeout(stream, timeout_sec: float) -> str:
     return box[0]
 
 
+class _StderrDrainer:
+    """Background reader so worker stderr cannot fill the pipe and deadlock."""
+
+    def __init__(self, proc: subprocess.Popen[str], alias: str) -> None:
+        self._alias = alias
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(proc,),
+            name=f"worker-stderr-{alias}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def tail(self, max_bytes: int = 8192) -> str:
+        with self._lock:
+            return tail_text("".join(self._lines), max_bytes=max_bytes)
+
+    def _run(self, proc: subprocess.Popen[str]) -> None:
+        stderr = proc.stderr
+        if stderr is None:
+            return
+        try:
+            for line in stderr:
+                with self._lock:
+                    self._lines.append(line)
+                stripped = line.rstrip("\n")
+                if stripped:
+                    logger.debug(
+                        "worker stderr alias=%s line=%s",
+                        self._alias,
+                        stripped[:500],
+                    )
+        except (OSError, ValueError):
+            logger.debug("worker stderr drainer stopped alias=%s", self._alias)
+
+
 class PersistentWorkerSession:
     """One long-lived ``uv run <worker> serve`` process per alias."""
 
@@ -81,6 +121,7 @@ class PersistentWorkerSession:
         self.alias = alias
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
+        self._stderr_drainer: _StderrDrainer | None = None
 
     def is_running(self) -> bool:
         with self._lock:
@@ -99,6 +140,7 @@ class PersistentWorkerSession:
                 return False
             if self._proc.poll() is not None:
                 self._proc = None
+                self._stderr_drainer = None
                 return True
             self._shutdown_locked()
             return True
@@ -139,6 +181,9 @@ class PersistentWorkerSession:
         except OSError as exc:
             raise RuntimeError(f"Failed to start worker '{self.alias}': {exc}") from exc
 
+        self._stderr_drainer = _StderrDrainer(proc, self.alias)
+        self._stderr_drainer.start()
+
         try:
             ready = _read_json_response(
                 proc.stdout,
@@ -146,11 +191,12 @@ class PersistentWorkerSession:
                 alias=self.alias,
             )
         except TimeoutError as exc:
-            self._terminate_process(proc)
+            self._clear_process(proc)
             raise WorkerSpawnTimeout(self.alias, SESSION_START_TIMEOUT_SEC) from exc
 
         if proc.poll() is not None:
-            stderr = tail_text(proc.stderr.read() if proc.stderr else "")
+            stderr = self._stderr_tail(proc)
+            self._clear_process(proc)
             raise WorkerSpawnFailed(
                 self.alias,
                 proc.returncode or 1,
@@ -158,11 +204,12 @@ class PersistentWorkerSession:
             )
 
         if not ready.get("ok"):
-            self._terminate_process(proc)
+            stderr = self._stderr_tail(proc)
+            self._clear_process(proc)
             raise WorkerSpawnFailed(
                 self.alias,
                 1,
-                str(ready.get("error") or "worker failed to become ready"),
+                stderr or str(ready.get("error") or "worker failed to become ready"),
             )
 
         self._proc = proc
@@ -178,9 +225,9 @@ class PersistentWorkerSession:
         if proc is None:
             return
         self._proc = None
+        self._stderr_drainer = None
 
         if proc.poll() is not None:
-            proc.stderr.read() if proc.stderr else None
             return
 
         try:
@@ -198,8 +245,8 @@ class PersistentWorkerSession:
             raise RuntimeError(f"Worker session '{self.alias}' is not running")
 
         if proc.poll() is not None:
-            stderr = tail_text(proc.stderr.read() if proc.stderr else "")
-            self._proc = None
+            stderr = self._stderr_tail(proc)
+            self._clear_process(proc)
             raise WorkerSpawnFailed(
                 self.alias,
                 proc.returncode or 1,
@@ -214,17 +261,15 @@ class PersistentWorkerSession:
                 alias=self.alias,
             )
         except TimeoutError as exc:
-            self._terminate_process(proc)
-            self._proc = None
+            self._clear_process(proc)
             raise WorkerSpawnTimeout(self.alias, timeout_sec) from exc
         except OSError as exc:
-            self._terminate_process(proc)
-            self._proc = None
+            self._clear_process(proc)
             raise WorkerSpawnFailed(self.alias, 1, str(exc)) from exc
 
         if proc.poll() is not None:
-            stderr = tail_text(proc.stderr.read() if proc.stderr else "")
-            self._proc = None
+            stderr = self._stderr_tail(proc)
+            self._clear_process(proc)
             raise WorkerSpawnFailed(
                 self.alias,
                 proc.returncode or 1,
@@ -237,6 +282,16 @@ class PersistentWorkerSession:
                 1,
                 str(response.get("error") or "worker request failed"),
             )
+
+    def _stderr_tail(self, proc: subprocess.Popen[str]) -> str:
+        if self._stderr_drainer is not None:
+            return self._stderr_drainer.tail()
+        return tail_text(proc.stderr.read() if proc.stderr else "")
+
+    def _clear_process(self, proc: subprocess.Popen[str]) -> None:
+        self._terminate_process(proc)
+        self._proc = None
+        self._stderr_drainer = None
 
     @staticmethod
     def _write_request(proc: subprocess.Popen[str], payload: dict[str, Any]) -> None:

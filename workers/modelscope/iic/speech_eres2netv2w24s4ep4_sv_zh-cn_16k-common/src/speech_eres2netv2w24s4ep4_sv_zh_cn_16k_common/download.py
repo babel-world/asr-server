@@ -62,7 +62,6 @@ def resolve_model_path() -> tuple[Path, str]:
     """
     ckpt_path = local_ckpt_path()
     if is_model_ready(ckpt_path):
-        print(f"Already present, skipping: {ckpt_path}", file=sys.stderr)
         return ckpt_path, "local"
     return download_to_local(), "downloaded"
 
