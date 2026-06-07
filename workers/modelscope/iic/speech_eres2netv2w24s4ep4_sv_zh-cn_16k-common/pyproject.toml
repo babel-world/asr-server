@@ -1,0 +1,18 @@
+[project]
+name = "speech-eres2netv2w24s4ep4-sv-zh-cn-16k-common"
+version = "0.1.0"
+description = "ERes2NetV2 SV embedding worker for GPT-SoVITS v2Pro pipeline B"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "modelscope[framework]>=1.37.1",
+    "numpy>=1.26.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+
+[project.scripts]
+speech-eres2netv2w24s4ep4-sv-zh-cn-16k-common = "speech_eres2netv2w24s4ep4_sv_zh_cn_16k_common.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"

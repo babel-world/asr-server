@@ -5,3 +5,11 @@ path = "huggingface/TencentGameMate/chinese-hubert-base"
 cli = "chinese-hubert-base"
 description = "Chinese HuBERT feature extraction (scaffold)"
 timeout_sec = 120
+
+[speech-eres2netv2w24s4ep4-sv-zh-cn-16k-common]
+source = "modelscope"
+repo_id = "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
+path = "modelscope/iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
+cli = "speech-eres2netv2w24s4ep4-sv-zh-cn-16k-common"
+description = "ERes2NetV2 SV embedding for GPT-SoVITS v2Pro pipeline B"
+timeout_sec = 120
