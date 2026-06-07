@@ -23,7 +23,7 @@ TARGET_SAMPLE_RATE = 16_000
 OUTPUT_DIM = 20480
 NUM_MEL_BINS = 80
 
-ERES2NET_DIR = Path(__file__).resolve().parent / "vendored" / "eres2net"
+ERES2NET_DIR = Path(__file__).resolve().parent / "vendor" / "eres2net"
 
 _runtime_lock = threading.Lock()
 _runtime: SvRuntime | None = None
