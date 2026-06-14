@@ -734,7 +734,7 @@ return result.returncode
 
 **注意**：振幅必须为常规 float32 范围（`[-1, 1]`），**不得**使用 HuBERT pipeline 的 1145.14 标度。推理内部先将波形转换为 80-bin Kaldi Fbank 特征，再过 ERes2NetV2 网络的 `forward3()` 接口。
 
-模型权重文件 `pretrained_eres2netv2w24s4ep4.ckpt` 存储于 `.models/` 目录（相对于 worker 项目根，而非 `src/` 包内），以避免 Windows MAX_PATH 限制。
+模型权重下载到 worker 项目根下的 `.models/<models_dir>/`（见 `workers/registry.toml`），不在 `src/` 包内，以缩短路径并避免 Windows MAX_PATH 限制。
 
 ---
 

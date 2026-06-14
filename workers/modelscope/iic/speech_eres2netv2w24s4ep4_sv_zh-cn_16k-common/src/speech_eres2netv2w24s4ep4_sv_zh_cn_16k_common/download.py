@@ -10,7 +10,7 @@ from modelscope.hub.snapshot_download import snapshot_download
 
 MS_REPO_ID = "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
 CKPT_NAME = "pretrained_eres2netv2w24s4ep4.ckpt"
-# Short local dir name under worker-root .models/ (avoids Windows MAX_PATH with nested modelscope/iic/...).
+# Short local dir name under worker-root .models/ (see workers/registry.toml).
 MODEL_DIR_NAME = "speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
 _MIN_CKPT_BYTES = 1_000_000
 
@@ -18,7 +18,7 @@ _MODEL_RESOLUTION_LOCK = threading.Lock()
 
 
 def get_models_dir() -> Path:
-    """Worker project root .models/ (not under src package — shorter paths on Windows)."""
+    """Worker project root .models/ (see workers/registry.toml)."""
     return Path(__file__).resolve().parent.parent.parent / ".models"
 
 

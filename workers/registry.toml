@@ -1,8 +1,27 @@
+# Worker registry for `workers/run_worker.py` and asr-server session dispatch.
+#
+# Required fields per entry:
+#   source      — huggingface | modelscope (informational)
+#   repo_id     — upstream model repository id
+#   path        — worker project dir, relative to workers/
+#   cli         — uv script name (pyproject [project.scripts])
+#
+# Model weights (gitignored, not committed):
+#   workers/<path>/.models/<models_dir>/
+#
+# Convention: `.models/` lives at the worker **project root** (next to pyproject.toml),
+# not under src/<package>/. Use a short local folder name in `models_dir` — do not
+# mirror the full repo_id path (keeps Windows MAX_PATH safe).
+#
+# Each worker's download.py must resolve the same path:
+#   Path(__file__).resolve().parent.parent.parent / ".models" / MODEL_DIR_NAME
+
 [chinese-hubert-base]
 source = "huggingface"
 repo_id = "TencentGameMate/chinese-hubert-base"
 path = "huggingface/TencentGameMate/chinese-hubert-base"
 cli = "chinese-hubert-base"
+models_dir = "chinese-hubert-base"
 description = "Chinese HuBERT feature extraction (scaffold)"
 timeout_sec = 120
 
@@ -11,5 +30,6 @@ source = "modelscope"
 repo_id = "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
 path = "modelscope/iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
 cli = "speech-eres2netv2w24s4ep4-sv-zh-cn-16k-common"
+models_dir = "speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
 description = "ERes2NetV2 SV embedding for GPT-SoVITS v2Pro pipeline B"
 timeout_sec = 120

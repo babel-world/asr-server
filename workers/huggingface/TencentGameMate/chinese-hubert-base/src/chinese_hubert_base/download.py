@@ -25,8 +25,8 @@ def hf_token() -> str | None:
 
 
 def get_models_dir() -> Path:
-    """Worker-local model storage: <package>/.models."""
-    return Path(__file__).resolve().parent / ".models"
+    """Worker project root .models/ (same layout as all registered workers)."""
+    return Path(__file__).resolve().parent.parent.parent / ".models"
 
 
 def local_model_dir() -> Path:

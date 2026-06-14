@@ -4,5 +4,5 @@
 # Generated inference / pipeline outputs
 outputs/
 
-# Downloaded model weights (per-worker .models under src packages)
+# Downloaded model weights (per-worker .models at worker project root)
 .models/
